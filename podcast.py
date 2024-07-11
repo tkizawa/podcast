@@ -1,46 +1,18 @@
 import os
 import subprocess
-import json
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
 import numpy as np
-from scipy.io import wavfile
-from scipy.signal import correlate
+from scipy.fftpack import fft, ifft
+import speech_recognition as sr
 
 # 必要なディレクトリの確認と作成
 for dir in ['./input', './output', './sample', './setting', './artWork']:
     if not os.path.exists(dir):
         os.makedirs(dir)
 
-
-# EQの設定ファイルを作成
-eq_settings = """32,-12.0
-64,-12.0
-128,-4.4
-250,-1.5
-500,0
-1000,4.0
-2000,4.0
-4000,0
-8000,-1.5
-16000,-6.5"""
-
-with open('./setting/eq.txt', 'w') as f:
-    f.write(eq_settings)
-
-# タグ情報のファイルを作成
-tag_info = """タイトル=第737回 Windows 11がクリーンインストールできない・Microsoft 365のコース切り替え・Windows 11 6月の機能アップデート (2024/7/6)
-アルバム=WoodStreamのデジタル生活(マイクロソフト系Podcast)
-年=2024
-ジャンル=Podcast
-参加アーティスト=木澤朋和
-トラック番号=1"""
-
-with open('./setting/tag.txt', 'w', encoding='utf-8') as f:
-    f.write(tag_info)
-
 def remove_silence(audio):
-    # 3秒以上の無音を1秒に短縮
+    # 2秒以上の無音を1秒に短縮
     chunks = split_on_silence(audio, min_silence_len=2000, silence_thresh=-40)
     processed_chunks = [chunks[0]]
     for chunk in chunks[1:]:
@@ -49,26 +21,55 @@ def remove_silence(audio):
         processed_chunks.append(chunk)
     return sum(processed_chunks)
 
-def remove_lip_noise(audio, sample):
-    # リップノイズの除去
+def remove_lip_noise_fft(audio, sample, threshold=0.5):
     audio_array = np.array(audio.get_array_of_samples())
     sample_array = np.array(sample.get_array_of_samples())
-    corr = correlate(audio_array, sample_array, mode='valid')
-    threshold = 0.8 * np.max(corr)
-    peaks = np.where(corr > threshold)[0]
     
-    for peak in peaks:
-        start = peak
-        end = peak + len(sample_array)
-        audio_array[start:end] = 0
+    audio_fft = fft(audio_array)
+    sample_fft = fft(sample_array, n=len(audio_array))
+    
+    audio_power = np.abs(audio_fft)
+    sample_power = np.abs(sample_fft)
+    
+    mask = audio_power > (threshold * sample_power)
+    audio_fft_filtered = audio_fft * mask
+    
+    audio_filtered = np.real(ifft(audio_fft_filtered))
+    
+    return AudioSegment(audio_filtered.astype(np.int16).tobytes(), frame_rate=audio.frame_rate, sample_width=audio.sample_width, channels=audio.channels)
+
+def detect_fillers(audio_segment, filler_words=["あー", "えー", "あのー"]):
+    recognizer = sr.Recognizer()
+    fillers = []
+    
+    chunks = split_on_silence(audio_segment, min_silence_len=500, silence_thresh=-40)
+    
+    for i, chunk in enumerate(chunks):
+        chunk.export(f"temp_chunk_{i}.wav", format="wav")
+        
+        with sr.AudioFile(f"temp_chunk_{i}.wav") as source:
+            audio = recognizer.record(source)
+            try:
+                text = recognizer.recognize_google(audio, language="ja-JP")
+                
+                if any(filler in text for filler in filler_words):
+                    fillers.append((chunk.duration_seconds * 1000 * i, chunk.duration_seconds * 1000 * (i + 1)))
+            except sr.UnknownValueError:
+                pass
+        
+        os.remove(f"temp_chunk_{i}.wav")  # 一時ファイルの削除
+    
+    return fillers
+
+def remove_fillers(audio, fillers, reduction_factor=0.2):
+    audio_array = np.array(audio.get_array_of_samples())
+    
+    for start, end in fillers:
+        start_sample = int(start * audio.frame_rate / 1000)
+        end_sample = int(end * audio.frame_rate / 1000)
+        audio_array[start_sample:end_sample] *= reduction_factor
     
     return AudioSegment(audio_array.tobytes(), frame_rate=audio.frame_rate, sample_width=audio.sample_width, channels=audio.channels)
-
-def remove_filler_words(audio, samples):
-    # フィラー語の除去
-    for sample in samples:
-        audio = remove_lip_noise(audio, sample)
-    return audio
 
 def apply_eq(input_file, output_file):
     # EQ設定の適用
@@ -98,14 +99,15 @@ def process_audio(input_file):
     audio = remove_silence(audio)
 
     # リップノイズの除去
-#    print("リップノイズを除去しています...")
-#    lip_noise_sample = AudioSegment.from_wav('./sample/lip_noise.wav')
-#    audio = remove_lip_noise(audio, lip_noise_sample)
+    print("リップノイズを除去しています...")
+    lip_noise_sample = AudioSegment.from_wav('./sample/lip_noise.wav')
+    audio = remove_lip_noise_fft(audio, lip_noise_sample)
 
     # フィラー語の除去
-    print("フィラー語を除去しています...")
-    filler_samples = [AudioSegment.from_wav(os.path.join('./sample', f)) for f in os.listdir('./sample') if f.startswith('filler_')]
-    audio = remove_filler_words(audio, filler_samples)
+#    print("フィラー語を検出しています...")
+#    fillers = detect_fillers(audio)
+#    print("フィラー語を除去しています...")
+#    audio = remove_fillers(audio, fillers)
 
     # 一時的なWAVファイルとして保存
     temp_wav = './temp_processed.wav'
@@ -114,7 +116,6 @@ def process_audio(input_file):
     # ラウドネスノーマライズとEQ処理
     print("ラウドネスノーマライズとEQ処理を適用しています...")
     temp_eq_wav = './temp_eq.wav'
-#    temp_eq_wav = temp_wav
     apply_eq(temp_wav, temp_eq_wav)
 
     # MP3への変換とメタデータの追加
@@ -146,7 +147,7 @@ def process_audio(input_file):
 
     # 一時ファイルの削除
     os.remove(temp_wav)
-#    os.remove(temp_eq_wav)
+    os.remove(temp_eq_wav)
 
     print("処理が完了しました。出力ファイル:", output_file)
 
