@@ -12,6 +12,7 @@ for dir in ['./input', './output', './sample', './setting', './artWork']:
     if not os.path.exists(dir):
         os.makedirs(dir)
 
+
 # EQの設定ファイルを作成
 eq_settings = """32,-12.0
 64,-12.0
