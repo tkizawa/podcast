@@ -1,4 +1,4 @@
-タイトル=第737回 Windows 11がクリーンインストールできない・Microsoft 365のコース切り替え・Windows 11 6月の機能アップデート (2024/7/6)
+タイトル=第741回 気になるガジェット・PowerToys 0.83・Windows 11 24H2 Relese Preview (2024/8/4)
 アルバム=WoodStreamのデジタル生活(マイクロソフト系Podcast)
 年=2024
 ジャンル=Podcast

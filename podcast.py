@@ -99,9 +99,9 @@ def process_audio(input_file):
     audio = remove_silence(audio)
 
     # リップノイズの除去
-    print("リップノイズを除去しています...")
-    lip_noise_sample = AudioSegment.from_wav('./sample/lip_noise.wav')
-    audio = remove_lip_noise_fft(audio, lip_noise_sample)
+#    print("リップノイズを除去しています...")
+#    lip_noise_sample = AudioSegment.from_wav('./sample/lip_noise.wav')
+#    audio = remove_lip_noise_fft(audio, lip_noise_sample)
 
     # フィラー語の除去
 #    print("フィラー語を検出しています...")
